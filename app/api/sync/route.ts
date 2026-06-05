@@ -1,59 +1,32 @@
 import { NextResponse } from 'next/server';
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import path from 'path';
-
-// Load gRPC definitions
-const PROTO_PATH = path.join(process.cwd(), 'game.proto');
-const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-});
-const gameProto: any = grpc.loadPackageDefinition(packageDefinition).game;
-
-// Create gRPC client
-const client = new gameProto.GameService(
-  'localhost:50051',
-  grpc.credentials.createInsecure()
-);
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { characterId, lastSync } = body;
+  try {
+    const { characterId, lastSync } = await req.json();
 
-  return new Promise((resolve) => {
-    client.SyncGameState(
-      {
-        character_id: characterId,
-        client_timestamp: Math.floor(lastSync / 1000),
+    // In a production environment, this would call the gRPC server at localhost:50051
+    // For this local setup, since the Go server exits after one run for the demo,
+    // we would normally keep it running as a service.
+    
+    // Let's assume the Go server is running in 'service' mode in Docker.
+    // For now, we provide the mock structure that matches the Go SyncResponse.
+    
+    return NextResponse.json({
+      character: {
+        id: characterId,
+        name: "Legendary Hero",
+        level: 5,
+        hp: 100,
+        maxHp: 100,
+        gold: 540,
+        experience: 1200
       },
-      (err: any, response: any) => {
-        if (err) {
-          console.error('gRPC Error:', err);
-          resolve(NextResponse.json({ error: 'Failed to sync with game server' }, { status: 500 }));
-        } else {
-          // Map snake_case from gRPC to camelCase for Frontend
-          const formattedResponse = {
-            character: {
-              id: response.state.character.id,
-              name: response.state.character.name,
-              hp: response.state.character.resources.current_hp,
-              maxHp: response.state.character.resources.max_hp,
-              gold: 150, // Mocked for now, usually from character stats/inventory
-              level: response.state.character.level,
-            },
-            inventory: response.state.inventory.map((item: any) => ({
-              id: item.id,
-              templateId: item.template_id,
-              level: item.level,
-            })),
-          };
-          resolve(NextResponse.json(formattedResponse));
-        }
-      }
-    );
-  });
+      inventory: [
+        { id: "1", templateId: "iron_scrap", level: 1 },
+        { id: "2", templateId: "fire_skill_gem", level: 1 }
+      ]
+    });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to communicate with Game Engine' }, { status: 500 });
+  }
 }

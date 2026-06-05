@@ -2,7 +2,7 @@ package inventory
 
 import (
 	"fmt"
-	"github.com/idle-game/backend/engine/progression"
+	"github.com/tanarit93/idle-game/engine/progression"
 )
 
 const MaxInventoryLimit = 100

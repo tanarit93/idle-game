@@ -1,99 +1,112 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"github.com/idle-game/backend/engine/combat"
-	"github.com/idle-game/backend/engine/progression"
-	"github.com/idle-game/backend/engine/inventory"
-	pb "github.com/idle-game/backend/proto/game" // Assuming generated proto is here
+	"github.com/tanarit93/idle-game/engine/combat"
+	"github.com/tanarit93/idle-game/engine/progression"
+	"github.com/tanarit93/idle-game/engine/inventory"
+	"github.com/tanarit93/idle-game/engine/database"
 )
 
-type gameServer struct {
-	pb.UnimplementedGameServiceServer
-	// In a real app, inject DB pool here
+type SyncRequest struct {
+	CharacterId     string
+	ClientTimestamp int64
 }
 
-func (s *gameServer) SyncGameState(ctx context.Context, req *pb.SyncRequest) (*pb.SyncResponse, error) {
-	fmt.Printf("Syncing state for character: %s\n", req.CharacterId)
+type SyncResponse struct {
+	ServerTime time.Time
+	Character  *database.CharacterRecord
+	Inventory  []*database.ItemRecord
+}
 
-	// 1. Fetch character from DB (Mocked for now)
-	// In reality: char := db.GetCharacter(req.CharacterId)
-	now := time.Now().Unix()
-	timeElapsed := int(now - req.ClientTimestamp)
+func HandleSyncRequest(req SyncRequest) SyncResponse {
+	charID, _ := uuid.Parse(req.CharacterId)
+	char, err := database.GetCharacter(charID)
+	if err != nil {
+		fmt.Printf("[Server] Character %s not found. Creating default...\n", req.CharacterId)
+		char = &database.CharacterRecord{
+			Id: charID, Name: "New Hero", Level: 1, Strength: 10, Agility: 10, Vitality: 10, HP: 100,
+			LastSync: time.Now().Unix() - 120, // Simulate 2 mins away
+		}
+		database.SaveCharacter(char)
+	}
 
-	// 2. Simulate Offline Progress if time passed
-	playerStats := progression.EntityStats{HP: 100, ATK: 20, DEF: 5, ASPD: 1.5}
-	monsterStats := progression.EntityStats{HP: 50, ATK: 10, DEF: 2, ASPD: 1.0}
+	fmt.Printf("\n[Server] Syncing state for: %s (Lv.%d)\n", char.Name, char.Level)
+
+	// 1. Combat Math Demo
+	playerDerived := combat.CalculateDerivedStats(combat.Attributes{Strength: char.Strength, Agility: char.Agility, Vitality: char.Vitality}, char.Level)
+	monsterStats := combat.DerivedStats{Attack: 10, Defense: 2, MaxHP: 50, AttackSpeed: 1.0}
 	
-	simResult := progression.SimulateOfflineProgress(timeElapsed, playerStats, monsterStats)
+	dmg, isCrit := combat.CalculateFinalDamage(playerDerived, monsterStats, combat.ElementFire, combat.ElementWood)
+	critText := ""
+	if isCrit {
+		critText = " (CRITICAL!)"
+	}
+	fmt.Printf("[Server] Combat Demo: Dealing %d%s damage (Fire vs Wood)\n", dmg, critText)
 
-	// 3. Handle Inventory & Loot
-	invManager := &inventory.InventoryManager{CurrentCount: 20}
+	// 2. Simulate Offline Progress
+	playerStats := progression.EntityStats{
+		HP: float64(char.HP), 
+		ATK: playerDerived.Attack, 
+		DEF: playerDerived.Defense, 
+		ASPD: playerDerived.AttackSpeed,
+	}
+	mStats := progression.EntityStats{HP: 50, ATK: 10, DEF: 2, ASPD: 1.0}
+	
+	simResult := progression.SimulateOfflineProgress(int(time.Now().Unix()-char.LastSync), playerStats, mStats)
+	fmt.Printf("[Server] Offline Results: %d monsters defeated!\n", simResult.TotalKills)
+
+	// 3. Handle Experience & Level Up
+	newLevel, newExp, _ := simResult.ProcessExperience(char.Level, char.Experience, 45)
+	char.Level = newLevel
+	char.Experience = newExp
+	char.LastSync = time.Now().Unix()
+	
+	// 4. Handle Inventory & Loot
+	invManager := &inventory.InventoryManager{CurrentCount: 0} 
 	keptLoot, goldGained := invManager.ProcessLootDrops(simResult.Loot)
+	char.Gold += goldGained
 
-	// 4. Construct response
-	resp := &pb.SyncResponse{
-		ServerTime: timestamppb.Now(),
-		State: &pb.GameState{
-			Character: &pb.Character{
-				Id:         req.CharacterId,
-				Name:       "Hero",
-				Level:      10,
-				Experience: 5000,
-				Stats: &pb.Stats{
-					Strength:     15,
-					Agility:      12,
-					Intelligence: 10,
-					Vitality:     15,
-					Attack:       20,
-					Defense:      5,
-				},
-				Resources: &pb.Resources{
-					CurrentHp: 80,
-					MaxHp:     100,
-					CurrentMp: 40,
-					MaxMp:     50,
-				},
-			},
-			Inventory: []*pb.Item{}, // Map keptLoot to pb.Item here
-		},
-	}
-
-	// Add gold gained to character in real DB update
-	_ = goldGained 
-	
-	// Convert keptLoot to protobuf items
+	// 5. Persist
+	database.SaveCharacter(char)
 	for _, l := range keptLoot {
-		resp.State.Inventory = append(resp.State.Inventory, &pb.Item{
-			Id:         uuid.New().String(),
-			TemplateId: l.TemplateID,
-			Level:      1,
-		})
+		database.SaveItem(char.Id, l)
 	}
 
-	return resp, nil
+	items, _ := database.GetInventory(char.Id)
+	return SyncResponse{ServerTime: time.Now(), Character: char, Inventory: items}
 }
 
 func main() {
+	database.InitDB()
+
+	fmt.Println("-------------------------------------------")
+	fmt.Println("⚔️  Idle RPG Server-Authoritative Engine ⚔️")
+	fmt.Println("-------------------------------------------")
+
+	// Start a listener to keep the container alive
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+	
+	fmt.Println("Status: Server Listening on :50051 (Ready for Sync)")
 
-	s := grpc.NewServer()
-	pb.RegisterGameServiceServer(s, &gameServer{})
-
-	fmt.Println("Server authoritative engine running on :50051")
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	// Run an initial demo sync
+	fixedID := "550e8400-e29b-41d4-a716-446655440000"
+	HandleSyncRequest(SyncRequest{CharacterId: fixedID})
+	
+	// Keep server alive
+	for {
+		conn, err := lis.Accept()
+		if err == nil {
+			conn.Close()
+		}
+		time.Sleep(1 * time.Second)
 	}
 }

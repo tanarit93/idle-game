@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package game;
 
-option go_package = "github.com/idle-game/backend/proto/game";
+option go_package = "github.com/tanarit93/idle-game/proto/game";
 
 import "google/protobuf/timestamp.proto";
 
