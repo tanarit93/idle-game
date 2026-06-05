@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package game;
+
+option go_package = "github.com/idle-game/backend/proto/game";
+
+import "google/protobuf/timestamp.proto";
+
+// Service for handling core game logic and state sync
+service GameService {
+  // SyncGameState allows the client to reconcile its state with the server.
+  // The server remains the ultimate source of truth.
+  rpc SyncGameState(SyncRequest) returns (SyncResponse);
+}
+
+// Elements following: Fire > Wood > Water > Fire
+enum Element {
+  ELEMENT_NONE = 0;
+  ELEMENT_FIRE = 1;
+  ELEMENT_WOOD = 2;
+  ELEMENT_WATER = 3;
+}
+
+enum ItemType {
+  ITEM_TYPE_UNSPECIFIED = 0;
+  ITEM_TYPE_WEAPON = 1;
+  ITEM_TYPE_ARMOR = 2;
+  ITEM_TYPE_GEM = 3;
+  ITEM_TYPE_CONSUMABLE = 4;
+}
+
+message SyncRequest {
+  string character_id = 1;
+  int64 client_timestamp = 2; // Used for drift calculation
+}
+
+message SyncResponse {
+  GameState state = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message GameState {
+  Character character = 1;
+  repeated Item inventory = 2;
+}
+
+message Character {
+  string id = 1;
+  string name = 2;
+  uint32 level = 3;
+  uint64 experience = 4;
+  Stats stats = 5;
+  Resources resources = 6;
+}
+
+message Stats {
+  uint32 strength = 1;
+  uint32 agility = 2;
+  uint32 intelligence = 3;
+  uint32 vitality = 4;
+  
+  // Calculated secondary stats (Server-computed)
+  uint32 attack = 5;
+  uint32 defense = 6;
+  float crit_rate = 7;
+  float attack_speed = 8;
+}
+
+message Resources {
+  uint32 current_hp = 1;
+  uint32 max_hp = 2;
+  uint32 current_mp = 3;
+  uint32 max_mp = 4;
+}
+
+message Item {
+  string id = 1;
+  string template_id = 2;
+  ItemType type = 3;
+  Element element = 4;
+  
+  bool is_equipped = 5;
+  uint32 level = 6;
+  
+  // Slotting System
+  uint32 max_slots = 7;
+  repeated Item slotted_gems = 8; // Recursive structure for nested gems
+}

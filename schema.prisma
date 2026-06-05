@@ -1,0 +1,94 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ItemType {
+  WEAPON
+  ARMOR
+  GEM
+  CONSUMABLE
+}
+
+enum Element {
+  FIRE
+  WOOD
+  WATER
+  NONE
+}
+
+model User {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  username      String      @unique
+  passwordHash  String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  characters    Character[]
+}
+
+model Character {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  name          String
+  level         Int      @default(1)
+  experience    BigInt   @default(0)
+  
+  // Base Stats
+  strength      Int      @default(10)
+  agility       Int      @default(10)
+  intelligence  Int      @default(10)
+  vitality      Int      @default(10)
+
+  // Resources
+  currentHp     Int
+  currentMp     Int
+
+  // Inventory & Equipment
+  items         Item[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Item {
+  id            String    @id @default(uuid())
+  characterId   String
+  character     Character @relation(fields: [characterId], references: [id])
+  
+  // Reference to a static game data template (e.g., "iron_sword_001")
+  templateId    String
+  
+  type          ItemType
+  element       Element   @default(NONE)
+  
+  // Equipment specific fields
+  isEquipped    Boolean   @default(false)
+  maxSlots      Int       @default(0) // Only relevant for WEAPON/ARMOR
+  
+  // Parent-Child relationship for Skill Gems
+  // Gems are "slotted into" Equipment
+  slottedInId   String?
+  slottedIn     Item?     @relation("SlottedGems", fields: [slottedInId], references: [id])
+  gems          Item[]    @relation("SlottedGems")
+
+  // Dynamic stats (e.g., from enhancement or random rolls)
+  level         Int       @default(1)
+  durability    Int       @default(100)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([characterId])
+  @@index([slottedInId])
+}
